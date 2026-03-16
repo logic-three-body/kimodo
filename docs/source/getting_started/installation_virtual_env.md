@@ -22,6 +22,13 @@ conda activate kimodo
 ### Install PyTorch
 First, make sure to install a version of [PyTorch](https://pytorch.org/get-started/locally/) that works with your system and CUDA version. We suggest anything over PyTorch 2.0. We strongly suggest using a GPU-capable version of PyTorch to generate motions in a reasonable amount of time.
 
+### (Optional) Clone Modified Viser Library
+The interactive demo relies on [a fork of Viser](https://github.com/nv-tlabs/kimodo-viser) that implements a timeline interface and more. If you want to have an editable install of this version of Viser (i.e., you expect to modify it), clone and install it within the `kimodo` directory using:
+```bash
+git clone https://github.com/nv-tlabs/kimodo-viser.git
+pip install -e kimodo-viser
+```
+
 ### Install Kimodo
 Next, install Kimodo run this command from the base of repo:
 ```bash

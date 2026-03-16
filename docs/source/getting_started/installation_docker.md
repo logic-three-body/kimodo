@@ -2,6 +2,12 @@
 
 > Note: the first time building and running with Docker can take several minutes, please be patient.
 
+### Clone Modified Viser Library
+The interactive demo relies on [a fork of Viser](https://github.com/nv-tlabs/kimodo-viser) that implements a timeline interface and more. Clone it within the `kimodo` directory before building with Docker using:
+```bash
+git clone https://github.com/nv-tlabs/kimodo-viser.git
+```
+
 ## Quick Install
 
 Before running Docker, make sure your Hugging Face token is available at

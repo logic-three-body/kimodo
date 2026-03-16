@@ -57,13 +57,6 @@ git clone https://github.com/nv-tlabs/kimodo.git
 cd kimodo
 ```
 
-### Clone Modified Viser Library
-The interactive demo relies on [a fork of Viser](https://github.com/nv-tlabs/kimodo-viser) that implements a timeline interface and more. Clone and install it within the `kimodo` directory using:
-```bash
-git clone https://github.com/nv-tlabs/kimodo-viser.git
-pip install -e kimodo-viser
-```
-
 ### Choose Your Installation Route
 Kimodo can be installed by building and running through a virtual environment (e.g., `conda`) or within a Docker container.
 
