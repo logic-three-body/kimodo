@@ -5,11 +5,11 @@ import argparse
 import os
 from typing import Any, Dict, Optional
 
-import numpy as np
 import torch
 
 from kimodo import DEFAULT_MODEL, load_model
 from kimodo.constraints import load_constraints_lst
+from kimodo.exports.motion_io import save_kimodo_npz
 from kimodo.meta import load_prompts_from_meta
 from kimodo.model.cfg import CFG_TYPES
 from kimodo.model.registry import get_model_info
@@ -333,7 +333,7 @@ def main():
             k: (v[0] if hasattr(v, "shape") and len(v.shape) > 0 and v.shape[0] == n_samples else v)
             for k, v in output.items()
         }
-        np.savez(npz_path, **single)
+        save_kimodo_npz(npz_path, single)
     else:
         out_dir, _, base_name = _output_dir_and_path(output_base, "motion", ".npz")
         print(f"Saving the npz output to {out_dir}/ ({base_name}_00.npz ...)")
@@ -342,7 +342,7 @@ def main():
                 k: (v[i] if hasattr(v, "shape") and len(v.shape) > 0 and v.shape[0] == n_samples else v)
                 for k, v in output.items()
             }
-            np.savez(os.path.join(out_dir, f"{base_name}_{i:02d}.npz"), **single)
+            save_kimodo_npz(os.path.join(out_dir, f"{base_name}_{i:02d}.npz"), single)
 
     if resolved_model == "kimodo-smplx-rp":
         from kimodo.exports.smplx import AMASSConverter
@@ -378,7 +378,7 @@ def main():
             print("BVH export is only supported for SOMA skeletons. Skipping --bvh.")
         else:
             from kimodo.exports.bvh import save_motion_bvh
-            from kimodo.skeleton import global_rots_to_local_rots, SOMASkeleton30
+            from kimodo.skeleton import SOMASkeleton30, global_rots_to_local_rots
 
             if isinstance(skeleton, SOMASkeleton30):
                 # Motion has already been converted to somaskel77 within the model for output

@@ -15,6 +15,8 @@ kimodo_gen "A person walks forward." \
 
 The `--model` command corresponds to the Kimodo model checkpoint to generate with. By default, the `Kimodo-SOMA-RP-v1` is used if not provided. The output motion will be saved using the stem name given by `--output` in the Kimodo [output format](../user_guide/output_formats.md). If generating with a G1 or SMPL-X model, you can also save to other output formats like MuJoCo qpos CSV file and AMASS NPZ format.
 
+For **offline conversion** between Kimodo NPZ, AMASS NPZ, SOMA BVH, and G1 MuJoCo CSV after generating, use `kimodo_convert` (see [Motion format conversion](motion_convert.md)).
+
 **Multi-Prompt Generation:**
 
 Generating from a sequence of text prompts can be achieved by using multiple sentences separated by periods with corresponding durations:

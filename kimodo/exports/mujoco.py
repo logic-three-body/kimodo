@@ -15,6 +15,7 @@ from kimodo.geometry import (
     axis_angle_to_matrix,
     matrix_to_axis_angle,
     matrix_to_quaternion,
+    quaternion_to_matrix,
 )
 from kimodo.skeleton import G1Skeleton34, SkeletonBase, global_rots_to_local_rots
 from kimodo.tools import ensure_batched, to_numpy, to_torch
@@ -244,6 +245,86 @@ class MujocoQposConverter:
         if numpy:
             qpos = to_numpy(qpos)
         return qpos
+
+    def qpos_to_motion_dict(
+        self,
+        qpos: torch.Tensor | np.ndarray,
+        source_fps: float,
+        *,
+        root_quat_w_first: bool = True,
+        mujoco_rest_zero: bool = False,
+    ):
+        """Inverse of :meth:`to_qpos` / :meth:`dict_to_qpos` for MuJoCo CSV ``(T, 36)`` rows.
+
+        Args:
+            qpos: Shape ``(T, 36)`` or ``(1, T, 36)`` (root xyz, root quat wxyz, 29 joint angles).
+            source_fps: Source frame rate (Hz) of the qpos data.
+            root_quat_w_first: Must match how the CSV was written (default ``True``).
+            mujoco_rest_zero: Must match :meth:`dict_to_qpos` / :meth:`to_qpos`.
+
+        Returns:
+            Kimodo motion dict (see :func:`kimodo.exports.motion_io.complete_motion_dict`).
+        """
+        from kimodo.exports.motion_io import complete_motion_dict
+
+        qpos = to_torch(qpos, None)
+        if qpos.dim() == 2:
+            qpos = qpos.unsqueeze(0)
+        device = qpos.device
+        dtype = qpos.dtype
+        batch_size, num_frames, ncols = qpos.shape
+        if ncols != 36:
+            raise ValueError(f"Expected qpos last dim 36; got {ncols}")
+
+        kimodo_to_mujoco_matrix = self.kimodo_to_mujoco_matrix.to(device=device, dtype=dtype)
+        mujoco_to_kimodo_matrix = kimodo_to_mujoco_matrix.T
+
+        root_mujoco = qpos[..., :3]
+        root_positions = torch.matmul(mujoco_to_kimodo_matrix[None, None, ...], root_mujoco[..., None]).squeeze(-1)
+
+        quat = qpos[..., 3:7]
+        if root_quat_w_first:
+            root_rot_mujoco = quaternion_to_matrix(quat)
+        else:
+            quat_wxyz = quat[..., [3, 0, 1, 2]]
+            root_rot_mujoco = quaternion_to_matrix(quat_wxyz)
+
+        O0 = self._rot_offsets_f2q[0].to(device=device, dtype=dtype)
+        # root_rot_mujoco is (..., 3, 3) after optional batch unsqueeze (e.g. (1, T, 3, 3)).
+        # Use ``...il`` so ``k`` sums with ``kl``; ``...ik`` incorrectly keeps ``k`` in the output.
+        R_f2q_root = torch.einsum(
+            "ij,...jk,kl->...il",
+            mujoco_to_kimodo_matrix,
+            root_rot_mujoco,
+            kimodo_to_mujoco_matrix,
+        )
+        R_kimodo_root = torch.einsum("ij,...jk->...ik", O0.T, R_f2q_root)
+
+        joint_dofs = qpos[..., 7:]
+        if mujoco_rest_zero:
+            rest_dofs = self._rest_dofs.to(device=device, dtype=dtype)
+            angles = joint_dofs + rest_dofs[None, None, :]
+            use_relative = True
+        else:
+            angles = joint_dofs
+            use_relative = False
+
+        nb_joints = self.skeleton.nbjoints
+        template = torch.eye(3, device=device, dtype=dtype).expand(batch_size, num_frames, nb_joints, 3, 3).contiguous()
+        template[:, :, 0] = R_kimodo_root
+
+        local_rot_mats = self._joint_dofs_to_local_rot_mats(
+            angles,
+            template,
+            device,
+            dtype,
+            use_relative=use_relative,
+        )
+
+        if batch_size != 1:
+            raise ValueError(f"Only a single clip is supported; got batch_size={batch_size}")
+
+        return complete_motion_dict(local_rot_mats[0], root_positions[0], self.skeleton, source_fps)
 
     def save_csv(self, qpos: torch.Tensor | np.ndarray, csv_path):
         # comment this

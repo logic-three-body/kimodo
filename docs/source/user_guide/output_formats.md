@@ -7,6 +7,10 @@ CLI generation uses a single **output stem** (`--output`) for all formats (NPZ, 
 
 Use the `--bvh` flag to also export BVH (SOMA only) to the same stem.
 
+## Converting Between Formats
+
+To convert between the formats described below, see [Motion format conversion](motion_convert.md) (`kimodo_convert`).
+
 ## Kimodo NPZ Format
 
 Generated motions are stored as NPZ files (one file per sample, e.g. `motion_00.npz`) containing:

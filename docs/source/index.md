@@ -63,6 +63,7 @@ interactive_demo/index
 user_guide/cli
 user_guide/constraints
 user_guide/output_formats
+user_guide/motion_convert
 user_guide/configuration
 ```
 

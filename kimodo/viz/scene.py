@@ -511,13 +511,22 @@ class Character:
         if self.g1_mesh_rig is not None:
             self.g1_mesh_rig.set_wireframe(wireframe)
 
-    def precompute_skinning(self, joints_pos: torch.Tensor, joints_rot: torch.Tensor):
-        """Precompute skinning for all frames.
+    def precompute_skinning(self, joints_pos: torch.Tensor, joints_rot: torch.Tensor, chunk_size: int = 512):
+        """Precompute skinning for all frames, processing in chunks to avoid OOM.
 
         joints_pos: [T, J, 3], joints_rot: [T, J, 3, 3].
         """
         assert self.skin is not None
-        self.skinned_verts_cache = self.skin.skin(joints_rot, joints_pos, rot_is_global=True).cpu().numpy()
+        T = joints_pos.shape[0]
+        if T <= chunk_size:
+            self.skinned_verts_cache = self.skin.skin(joints_rot, joints_pos, rot_is_global=True).cpu().numpy()
+        else:
+            chunks = []
+            for start in range(0, T, chunk_size):
+                end = min(start + chunk_size, T)
+                verts = self.skin.skin(joints_rot[start:end], joints_pos[start:end], rot_is_global=True).cpu().numpy()
+                chunks.append(verts)
+            self.skinned_verts_cache = np.concatenate(chunks, axis=0)
 
     def update_skinning_cache(self, joints_pos: torch.Tensor, joints_rot: torch.Tensor, frame_idx: int):
         """Update skinning cache for one frame."""

@@ -321,6 +321,24 @@ def _get_latest_for_family_skeleton_dataset(family: str, skeleton: str, dataset:
     return max(candidates, key=version_key)
 
 
+def kimodo_short_key_for_skeleton_dataset(skeleton: str, dataset: str) -> Optional[str]:
+    """Return the latest Kimodo model short_key for ``skeleton`` and ``dataset`` (RP/SEED), or
+    None."""
+    info = _get_latest_for_family_skeleton_dataset("Kimodo", skeleton, dataset)
+    return info.short_key if info is not None else None
+
+
+def registry_skeleton_for_joint_count(nb_joints: int) -> str:
+    """Map motion joint count to registry skeleton key (SOMA / SMPLX / G1)."""
+    if nb_joints == 34:
+        return "G1"
+    if nb_joints == 22:
+        return "SMPLX"
+    if nb_joints in (77, 30):
+        return "SOMA"
+    raise ValueError(f"No Kimodo model registered for motion with J={nb_joints}")
+
+
 # Optional version: Family-Skeleton-Dataset-vN or Family-Skeleton-Dataset
 _RESOLVE_FULL_PATTERN = re.compile(
     r"^(Kimodo|TMR|kimodo|tmr)[\-_]" r"([A-Za-z0-9]+)[\-_]" r"(RP|SEED|rp|seed)" r"(?:[\-_]v(\d+))?$",

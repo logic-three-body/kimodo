@@ -377,21 +377,24 @@ class SkeletonBvh:
         joints = np.stack(joints, axis=0)
         return joints
 
-    def load_from_bvh(self, fname, exclude_bones=None, spec_channels=None):
+    def load_from_bvh(self, fname, exclude_bones=None, spec_channels=None, mocap=None):
         """Load skeleton hierarchy and rest offsets from a BVH file.
 
         Args:
-            fname: Path to a BVH file.
+            fname: Path to a BVH file (ignored when *mocap* is given).
             exclude_bones: Bone-name substrings to ignore while constructing the
                 skeleton.
             spec_channels: Optional per-joint channel overrides.
+            mocap: Pre-parsed :class:`Bvh` object.  When provided the file is
+                not re-read from disk.
         """
         if exclude_bones is None:
             exclude_bones = {}
         if spec_channels is None:
             spec_channels = dict()
-        with open(fname) as f:
-            mocap = Bvh(f.read())
+        if mocap is None:
+            with open(fname) as f:
+                mocap = Bvh(f.read())
 
         joint_names = list(
             filter(
@@ -466,22 +469,26 @@ def load_bvh_animation(
     rot_order: Optional[str] = "native",
     backend: Optional[str] = "np",
     return_quat: Optional[bool] = False,
+    mocap: Optional["Bvh"] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Load motion channels from BVH into root translations and joint rotations.
 
     Args:
-        fname: Full path to the BVH file.
+        fname: Full path to the BVH file (ignored when *mocap* is given).
         skeleton: Parsed neutral skeleton built from compatible BVH hierarchy.
         rot_order: Euler order to use for conversion (`"native"` keeps BVH order).
         backend: BVH parser backend (`"np"` or `"graph"`).
         return_quat: If `True`, return quaternions instead of rotation matrices.
+        mocap: Pre-parsed :class:`Bvh` object.  When provided the file is
+            not re-read from disk.
 
     Returns:
         Root translations `(T, 3)` and joint rotations `(T, J, 3, 3)` or
         `(T, J, 4)` when `return_quat=True`.
     """
-    with open(fname) as f:
-        mocap = Bvh(f.read(), backend=backend)
+    if mocap is None:
+        with open(fname) as f:
+            mocap = Bvh(f.read(), backend=backend)
 
     # assume all joints are same ordering, load in with native ordering
     root_channels = mocap.joint_channels(skeleton.root.name)
@@ -490,11 +497,12 @@ def load_bvh_animation(
 
     root_trans = np.array(mocap.frames_joint_channels(skeleton.root.name, pos_channels))
 
-    if backend == "np":
+    effective_backend = mocap.backend
+    if effective_backend == "np":
         # NOTE: assumes rot channel ordering is the same for all joints
         joint_eulers = mocap.frames_joints_channels(skeleton.get_bones_names(), rot_channels)
         joint_eulers = np.deg2rad(joint_eulers)
-    elif backend == "graph":
+    elif effective_backend == "graph":
         joint_eulers = []
         for bone in skeleton.bones:
             bone_channels = mocap.joint_channels(bone.name)
@@ -505,7 +513,7 @@ def load_bvh_animation(
             joint_eulers.append(euler)
         joint_eulers = np.stack(joint_eulers, axis=1)
     else:
-        raise ValueError(f"Unknown backend for BVH loading: {backend}")
+        raise ValueError(f"Unknown backend for BVH loading: {effective_backend}")
 
     if rot_order == "native":
         rot_order = ""
@@ -536,14 +544,19 @@ def parse_bvh_motion(file_path_input: str, parse_neutral_joints: bool = False):
         parse_neutral_joints: If `True`, also return neutral joints in meters.
 
     Returns:
-        `(local_rot_mats, root_trans)` or
-        `(local_rot_mats, root_trans, neutral_joints)` when requested.
+        ``(local_rot_mats, root_trans, fps)`` or
+        ``(local_rot_mats, root_trans, fps, neutral_joints)`` when requested.
     """
+    with open(file_path_input) as f:
+        mocap = Bvh(f.read(), backend="np")
+
+    fps = 1.0 / mocap.frame_time
+
     skeletonBVH = SkeletonBvh()
     exclude_bones = {"Root"}
-    skeletonBVH.load_from_bvh(file_path_input, exclude_bones=exclude_bones)
+    skeletonBVH.load_from_bvh(file_path_input, exclude_bones=exclude_bones, mocap=mocap)
 
-    root_trans, local_rot_mats = load_bvh_animation(file_path_input, skeletonBVH)
+    root_trans, local_rot_mats = load_bvh_animation(file_path_input, skeletonBVH, mocap=mocap)
     root_trans *= 0.01  # unit change: cm -> m
     root_trans = torch.tensor(root_trans)
     local_rot_mats = torch.tensor(local_rot_mats)
@@ -554,7 +567,7 @@ def parse_bvh_motion(file_path_input: str, parse_neutral_joints: bool = False):
     # carefull: the one saved in the folder it relative to the standard t_pose
     # whereas the parsed one is not
     if not parse_neutral_joints:
-        return local_rot_mats, root_trans
+        return local_rot_mats, root_trans, fps
 
     neutral_joints = skeletonBVH.get_neutral_joints()
     neutral_joints *= 0.01  # unit change: cm -> m
@@ -562,4 +575,4 @@ def parse_bvh_motion(file_path_input: str, parse_neutral_joints: bool = False):
     # (it is already "included" in the root_translation)
     root_idx = 0
     neutral_joints = torch.tensor(neutral_joints - neutral_joints[root_idx])
-    return local_rot_mats, root_trans, neutral_joints
+    return local_rot_mats, root_trans, fps, neutral_joints

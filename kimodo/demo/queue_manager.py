@@ -190,7 +190,13 @@ class QueueManager:
         """Handle new connection: activate if slot free, else enqueue and show queue modal."""
         client_id = client.client_id
         if self._queue.try_activate(client_id):
-            self._setup_demo_for_client(client)
+            try:
+                self._setup_demo_for_client(client)
+            except RuntimeError as e:
+                if "CUDA error" in str(e):
+                    print(f"CUDA error while setting up client {client_id}: {e}")
+                    return
+                raise
             self._start_session_timer(client_id)
             self._show_welcome_modal(client)
         else:
@@ -287,7 +293,13 @@ class QueueManager:
                 old[0].close()
             except Exception:
                 pass
-        self._setup_demo_for_client(client)
+        try:
+            self._setup_demo_for_client(client)
+        except RuntimeError as e:
+            if "CUDA error" in str(e):
+                print(f"CUDA error while setting up client {promoted_id}: {e}")
+                return
+            raise
         self._start_session_timer(promoted_id)
         self._show_welcome_modal(client)
         self._update_all_queue_modals()

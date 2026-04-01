@@ -264,8 +264,8 @@ class SOMASkeleton30(SkeletonBase):
     def output_to_SOMASkeleton77(self, output: dict) -> dict:
         """Convert model output dict from somaskel30 to somaskel77.
 
-        Expands local_rot_mats to 77 joints, re-runs FK for global_rot_mats and posed_joints.
-        Foot contacts are expanded from 4 channels to 6 (toe-end copies toe-base contact).
+        Expands local_rot_mats to 77 joints, re-runs FK for global_rot_mats and posed_joints. Foot
+        contacts are expanded from 4 channels to 6 (toe-end copies toe-base contact).
         """
         local_rot_mats_77 = self.to_SOMASkeleton77(output["local_rot_mats"])
         root_positions = output["root_positions"]
@@ -278,9 +278,7 @@ class SOMASkeleton30(SkeletonBase):
         if "foot_contacts" in output:
             fc = output["foot_contacts"]  # [..., 4]: [L_heel, L_toe, R_heel, R_toe]
             # -> [..., 6]: [L_heel, L_toe, L_toe_end, R_heel, R_toe, R_toe_end]
-            out_77["foot_contacts"] = torch.cat(
-                [fc[..., :2], fc[..., 1:2], fc[..., 2:4], fc[..., 3:4]], dim=-1
-            )
+            out_77["foot_contacts"] = torch.cat([fc[..., :2], fc[..., 1:2], fc[..., 2:4], fc[..., 3:4]], dim=-1)
 
         return out_77
 

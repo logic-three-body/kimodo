@@ -9,12 +9,12 @@ outside of interactive demos.
 import os
 import tempfile
 from pathlib import Path
+from typing import Tuple, Union
 
 import numpy as np
 import torch
 
 from kimodo.geometry import matrix_to_quaternion as _matrix_to_quaternion
-from kimodo.skeleton import SkeletonBase
 
 
 def _strip_end_site_blocks(bvh_text: str) -> str:
@@ -63,7 +63,7 @@ def motion_to_bvh(
     local_rot_mats: torch.Tensor,
     root_positions: torch.Tensor,
     *,
-    skeleton: "SkeletonBase",
+    skeleton,
     fps: float,
 ) -> str:
     """Convert local rotations and root positions to BVH format; return UTF-8 string.
@@ -210,7 +210,7 @@ def motion_to_bvh_bytes(
     local_rot_mats: torch.Tensor,
     root_positions: torch.Tensor,
     *,
-    skeleton: "SkeletonBase",
+    skeleton,
     fps: float,
 ) -> bytes:
     """Convert local rotations and root positions to BVH bytes (UTF-8).
@@ -221,11 +221,11 @@ def motion_to_bvh_bytes(
 
 
 def save_motion_bvh(
-    path: str | Path,
+    path: Union[str, Path],
     local_rot_mats: torch.Tensor,
     root_positions: torch.Tensor,
     *,
-    skeleton: "SkeletonBase",
+    skeleton,
     fps: float,
 ) -> None:
     """Write local rotations and root positions to a BVH file at the given path."""
@@ -233,3 +233,50 @@ def save_motion_bvh(
         motion_to_bvh(local_rot_mats, root_positions, skeleton=skeleton, fps=fps),
         encoding="utf-8",
     )
+
+
+def read_bvh_frame_time_seconds(path: Union[str, Path]) -> float:
+    """Read ``Frame Time`` from a BVH file (seconds per frame)."""
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if "Frame Time:" in line:
+                parts = line.split()
+                return float(parts[-1])
+    raise ValueError(f"Could not find 'Frame Time:' in {path}")
+
+
+def bvh_to_kimodo_motion(
+    path: Union[str, Path],
+    skeleton=None,
+) -> Tuple:
+    """Load a Kimodo-style SOMA BVH into a Kimodo motion dict.
+
+    Expects the same hierarchy as :func:`save_motion_bvh` (``Root`` wrapper + SOMA77 joints).
+    The frame rate is always read from the BVH ``Frame Time`` header.  Callers
+    that need a different playback rate should resample the returned motion dict
+    (see :func:`~kimodo.exports.motion_io.resample_motion_dict_to_kimodo_fps`).
+
+    Returns:
+        ``(motion_dict, source_fps)`` where ``source_fps`` is the native BVH
+        frame rate read from the file header.
+    """
+    from kimodo.exports.motion_io import complete_motion_dict
+    from kimodo.skeleton.bvh import parse_bvh_motion
+    from kimodo.skeleton.registry import build_skeleton
+
+    if skeleton is None:
+        skeleton = build_skeleton(77)
+    device = skeleton.neutral_joints.device
+
+    local_rot_mats, root_trans, bvh_fps = parse_bvh_motion(str(path))
+    local_rot_mats = local_rot_mats.to(device=device)
+    root_trans = root_trans.to(device=device)
+
+    if int(local_rot_mats.shape[1]) != int(skeleton.nbjoints):
+        raise ValueError(
+            f"BVH has {local_rot_mats.shape[1]} joints but skeleton has {skeleton.nbjoints}; "
+            "use a Kimodo-exported SOMA BVH or matching skeleton."
+        )
+    local_rot_mats, _ = skeleton.to_standard_tpose(local_rot_mats)
+
+    return complete_motion_dict(local_rot_mats, root_trans, skeleton, float(bvh_fps)), bvh_fps

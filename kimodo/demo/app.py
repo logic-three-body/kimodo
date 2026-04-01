@@ -64,6 +64,10 @@ class Demo:
         self.ensure_examples_layout()
         self.load_model(self.default_model_name)
 
+        # Serialize GPU-bound generation across all clients
+        self._generation_lock = threading.Lock()
+        self._cuda_healthy = True
+
         # Per-client sessions
         self.client_sessions: dict[int, ClientSession] = {}
         self.start_direction_markers: dict[int, viser_utils.WaypointMesh] = {}
@@ -488,6 +492,34 @@ class Demo:
     ):
         return generation.compute_model_constraints_lst(session, model_bundle, num_frames, self.device)
 
+    def check_cuda_health(self) -> bool:
+        """Check if CUDA is still functional.
+
+        Trigger auto-restart if corrupted.
+        """
+        if self.device == "cpu":
+            return True
+        try:
+            torch.tensor([1.0], device=self.device) + torch.tensor([1.0], device=self.device)
+            return True
+        except RuntimeError as e:
+            if "device-side assert" in str(e) or "CUDA error" in str(e):
+                if self._cuda_healthy:
+                    self._cuda_healthy = False
+                    print("FATAL: CUDA context is corrupted (device-side assert). " "The process must be restarted.")
+                    self._trigger_restart()
+                return False
+            raise
+
+    def _trigger_restart(self) -> None:
+        """Exit the process so the HF Space (or systemd/Docker) can restart it."""
+        import sys
+
+        print("Initiating automatic restart due to unrecoverable CUDA error...")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(1)
+
     def generate(
         self,
         client: viser.ClientHandle,
@@ -502,26 +534,43 @@ class Demo:
         transitions_parameters: Optional[dict] = None,
         real_robot_rotations: bool = False,
     ) -> None:
-        session = self.client_sessions[client.client_id]
-        model_bundle = self.load_model(session.model_name)
-        generation.generate(
-            client=client,
-            session=session,
-            model_bundle=model_bundle,
-            prompts=prompts,
-            num_frames=num_frames,
-            num_samples=num_samples,
-            seed=seed,
-            diffusion_steps=diffusion_steps,
-            cfg_weight=cfg_weight,
-            cfg_type=cfg_type,
-            postprocess_parameters=postprocess_parameters,
-            transitions_parameters=transitions_parameters,
-            real_robot_rotations=real_robot_rotations,
-            device=self.device,
-            clear_motions=self.clear_motions,
-            add_character_motion=self.add_character_motion,
-        )
+        if not self._cuda_healthy:
+            raise RuntimeError("CUDA is in a corrupted state. The space is restarting...")
+
+        locked = self._generation_lock.acquire(blocking=False)
+        if not locked:
+            waiting_notif = client.add_notification(
+                title="Waiting for GPU...",
+                body="Another generation is in progress. Yours will start automatically.",
+                loading=True,
+                with_close_button=False,
+            )
+            self._generation_lock.acquire()
+            waiting_notif.remove()
+
+        try:
+            session = self.client_sessions[client.client_id]
+            model_bundle = self.load_model(session.model_name)
+            generation.generate(
+                client=client,
+                session=session,
+                model_bundle=model_bundle,
+                prompts=prompts,
+                num_frames=num_frames,
+                num_samples=num_samples,
+                seed=seed,
+                diffusion_steps=diffusion_steps,
+                cfg_weight=cfg_weight,
+                cfg_type=cfg_type,
+                postprocess_parameters=postprocess_parameters,
+                transitions_parameters=transitions_parameters,
+                real_robot_rotations=real_robot_rotations,
+                device=self.device,
+                clear_motions=self.clear_motions,
+                add_character_motion=self.add_character_motion,
+            )
+        finally:
+            self._generation_lock.release()
 
     def set_frame(self, client_id: int, frame_idx: int, update_timeline: bool = True):
         if not self.client_active(client_id):
@@ -538,6 +587,7 @@ class Demo:
 
     def run(self) -> None:
         update_counter = 0
+        cuda_check_interval = 300
         while True:
             last_update_time = time.time()
             if self.models:
@@ -560,6 +610,9 @@ class Demo:
                     # make sure the client is still active before updating the frame
                     if self.client_active(client_id):
                         self.set_frame(client_id, new_frame_idx)
+
+            if update_counter % cuda_check_interval == 0:
+                self.check_cuda_health()
 
             time_remaining = max(0, 1.0 / playback_fps - (time.time() - last_update_time))
             time.sleep(time_remaining)

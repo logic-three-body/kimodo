@@ -30,8 +30,10 @@ def foot_detect_from_pos_and_vel(
     """
 
     device = positions.device
-    fid_l = skeleton.left_foot_joint_idx
-    fid_r = skeleton.right_foot_joint_idx
+    # Use at most 2 foot joints per side (ankle + toe); SOMA77 defines a
+    # third end-effector (ToeEnd) that SOMA30 and other skeletons omit.
+    fid_l = skeleton.left_foot_joint_idx[:2]
+    fid_r = skeleton.right_foot_joint_idx[:2]
 
     velfactor, heightfactor = (
         torch.tensor([vel_thres, vel_thres], device=device),

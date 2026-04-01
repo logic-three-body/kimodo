@@ -19,6 +19,14 @@ This repository provides:
   <img src="assets/teaser.gif" width="1280">
 </div>
 
+## News
+
+See the [full changelog](CHANGELOG.md) for a detailed list of all changes.
+
+- **[2026-03-19]** **Breaking:** Model inputs/outputs now use the SOMA 77-joint skeleton (`somaskel77`).
+- **[2026-03-16]** Initial open-source release of Kimodo with five model variants (SOMA, G1, SMPL-X), CLI, interactive demo, and timeline annotations for BONES-SEED.
+
+
 ## Kimodo Models
 
 Several variations of Kimodo-v1 are available trained on various skeletons and datasets. All models support text-to-motion and kinematic controls.

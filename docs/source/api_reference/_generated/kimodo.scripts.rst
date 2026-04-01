@@ -28,6 +28,14 @@ kimodo.scripts.lock\_requirements module
    :undoc-members:
    :show-inheritance:
 
+kimodo.scripts.motion\_convert module
+-------------------------------------
+
+.. automodule:: kimodo.scripts.motion_convert
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 kimodo.scripts.mujoco\_load module
 ----------------------------------
 

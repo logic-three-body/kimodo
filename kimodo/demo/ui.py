@@ -8,7 +8,15 @@ import threading
 from typing import Optional
 
 from kimodo.constraints import load_constraints_lst, save_constraints_lst
-from kimodo.exports.bvh import motion_to_bvh_bytes
+from kimodo.exports.bvh import motion_to_bvh_bytes, save_motion_bvh
+from kimodo.exports.motion_io import (
+    amass_npz_to_bytes,
+    g1_csv_to_bytes,
+    kimodo_npz_to_bytes,
+    load_motion_file,
+    save_kimodo_npz,
+)
+from kimodo.model.registry import kimodo_short_key_for_skeleton_dataset, registry_skeleton_for_joint_count
 from kimodo.tools import to_torch
 from kimodo.viz import viser_utils
 from kimodo.viz.viser_utils import GuiElements
@@ -678,12 +686,27 @@ def create_gui(
             visible=not HF_MODE,
         ):
             with client.gui.add_folder("Motion", expand_by_default=False):
-                gui_save_motion_path_text = client.gui.add_text("Save Path", initial_value="output.npz")
+                gui_save_motion_path_text = client.gui.add_text("Save Path", initial_value="output")
+                gui_save_motion_format_dropdown = client.gui.add_dropdown(
+                    "Save Format",
+                    options=(
+                        ["NPZ", "CSV"]
+                        if "g1" in model_name.lower()
+                        else ["NPZ", "AMASS NPZ"]
+                        if "smplx" in model_name.lower()
+                        else ["NPZ", "BVH"]
+                    ),
+                    initial_value="NPZ",
+                )
                 gui_save_motion_button = client.gui.add_button(
                     "Save Motion",
-                    hint="Save the current motion",
+                    hint="Save the current motion (format + path above)",
                 )
-                gui_load_motion_path_text = client.gui.add_text("Load Path", initial_value="output.npz")
+                gui_load_motion_path_text = client.gui.add_text(
+                    "Load Path",
+                    initial_value="output.npz",
+                    hint="SOMA .bvh, Kimodo or AMASS .npz, or G1 MuJoCo .csv",
+                )
                 gui_load_motion_button = client.gui.add_button(
                     "Load Motion",
                     hint="Load the selected motion",
@@ -730,13 +753,10 @@ def create_gui(
                 if joints_pos.ndim != 3:
                     raise ValueError(f"Expected unbatched joints_pos with shape [T, J, 3], got {joints_pos.shape}")
                 if joints_rot.ndim != 4:
-                    raise ValueError(
-                        f"Expected unbatched joints_rot with shape [T, J, 3, 3], got {joints_rot.shape}"
-                    )
+                    raise ValueError(f"Expected unbatched joints_rot with shape [T, J, 3, 3], got {joints_rot.shape}")
                 if joints_local_rot.ndim != 4:
                     raise ValueError(
-                        "Expected unbatched joints_local_rot with shape "
-                        f"[T, J, 3, 3], got {joints_local_rot.shape}"
+                        "Expected unbatched joints_local_rot with shape " f"[T, J, 3, 3], got {joints_local_rot.shape}"
                     )
 
                 motion_data = {
@@ -754,13 +774,46 @@ def create_gui(
                     motion_data["foot_contacts"] = foot_contacts
                 return motion_data
 
-            def save_motion(client, save_path):
+            def _coerce_save_path(raw_path: str, *, ext: str) -> str:
+                """Ensure the save path ends with the correct extension for the chosen format."""
+                name = (raw_path or "").strip()
+                if name == "":
+                    return f"output{ext}"
+                known_exts = (".npz", ".bvh", ".csv")
+                if name.lower().endswith(known_exts):
+                    return os.path.splitext(name)[0] + ext
+                if os.path.splitext(name)[1] == "":
+                    return name + ext
+                return name
+
+            def save_motion(client, save_path, fmt):
                 session = demo.client_sessions[client.client_id]
-                # only save the first motion
                 motion = _get_primary_motion(session)
                 motion_data = _motion_to_numpy_dict(motion)
-                motion_data.pop("root_positions")
-                np.savez(save_path, **motion_data)
+
+                if fmt == "BVH":
+                    save_path = _coerce_save_path(save_path, ext=".bvh")
+                    save_motion_bvh(
+                        save_path,
+                        motion.joints_local_rot,
+                        motion.joints_pos[:, session.skeleton.root_idx, :],
+                        skeleton=session.skeleton,
+                        fps=float(session.model_fps),
+                    )
+                elif fmt == "CSV":
+                    save_path = _coerce_save_path(save_path, ext=".csv")
+                    data = g1_csv_to_bytes(motion_data, session.skeleton, demo.device)
+                    with open(save_path, "wb") as f:
+                        f.write(data)
+                elif fmt == "AMASS NPZ":
+                    save_path = _coerce_save_path(save_path, ext=".npz")
+                    data = amass_npz_to_bytes(motion_data, session.skeleton, session.model_fps)
+                    with open(save_path, "wb") as f:
+                        f.write(data)
+                else:
+                    save_path = _coerce_save_path(save_path, ext=".npz")
+                    save_kimodo_npz(save_path, motion_data)
+                return save_path
 
             @gui_save_motion_button.on_click
             def _(event: viser.GuiEvent) -> None:
@@ -768,12 +821,13 @@ def create_gui(
                 if get_active_session(event_client) is None:
                     return
 
-                save_path = gui_save_motion_path_text.value
+                raw_path = gui_save_motion_path_text.value
+                fmt = str(gui_save_motion_format_dropdown.value).upper()
                 try:
-                    save_motion(event_client, save_path)
+                    saved_path = save_motion(event_client, raw_path, fmt)
                     event_client.add_notification(
                         title="Motion saved!",
-                        body=f"Saved motion to {save_path}",
+                        body=f"Saved motion to {saved_path}",
                         auto_close_seconds=5.0,
                         color="green",
                     )
@@ -791,28 +845,39 @@ def create_gui(
             def load_motion(client, load_path):
                 session = demo.client_sessions[client.client_id]
 
-                # Load the NPZ file
-                data = np.load(load_path)
+                fps_arg = session.model_fps if session.model_fps and session.model_fps > 0 else None
+                motion_dict, num_joints_motion = load_motion_file(load_path, target_fps=fps_arg)
 
-                # Extract motion data - handle different possible key names
-                if "joints_pos" in data:
-                    joints_pos = torch.from_numpy(data["joints_pos"]).to(demo.device)
-                elif "posed_joints" in data:
-                    joints_pos = torch.from_numpy(data["posed_joints"]).to(demo.device)
-                else:
-                    raise ValueError("NPZ file must contain 'joints_pos' or 'posed_joints'")
+                target_skel = registry_skeleton_for_joint_count(num_joints_motion)
+                current_info = get_model_info(session.model_name)
+                current_skel = current_info.skeleton if current_info is not None else None
 
-                if "joints_rot" in data:
-                    joints_rot = torch.from_numpy(data["joints_rot"]).to(demo.device)
-                elif "global_rot_mats" in data:
-                    joints_rot = torch.from_numpy(data["global_rot_mats"]).to(demo.device)
-                else:
-                    raise ValueError("NPZ file must contain 'joints_rot' or 'global_rot_mats'")
+                if current_skel != target_skel:
+                    dataset = current_info.dataset if current_info is not None else "RP"
+                    new_key = kimodo_short_key_for_skeleton_dataset(target_skel, dataset)
+                    if new_key is None:
+                        new_key = kimodo_short_key_for_skeleton_dataset(target_skel, "RP")
+                    if new_key is None:
+                        raise ValueError(
+                            f"No Kimodo model found for skeleton {target_skel} (motion has J={num_joints_motion})."
+                        )
+                    if new_key != session.model_name:
+                        gui_model_selector.set_from_short_key(new_key)
+                        apply_model_selection(new_key)
+                        _update_visibility_for_loaded_model(new_key)
+                        client.add_notification(
+                            title="Model switched",
+                            body=f"Switched to {new_key} to match loaded motion (J={num_joints_motion}).",
+                            auto_close_seconds=5.0,
+                            color="blue",
+                        )
+                    session = demo.client_sessions[client.client_id]
 
-                # Foot contacts are optional
-                foot_contacts = None
-                if "foot_contacts" in data:
-                    foot_contacts = torch.from_numpy(data["foot_contacts"]).to(demo.device)
+                joints_pos = motion_dict["posed_joints"].to(device=demo.device, dtype=torch.float32)
+                joints_rot = motion_dict["global_rot_mats"].to(device=demo.device, dtype=torch.float32)
+                foot_contacts = motion_dict.get("foot_contacts")
+                if foot_contacts is not None:
+                    foot_contacts = foot_contacts.to(device=demo.device, dtype=torch.float32)
 
                 # Support both batched [B, T, J, 3] and unbatched [T, J, 3]; take first sample if batched
                 if joints_pos.ndim == 4:
@@ -822,7 +887,7 @@ def create_gui(
                 if foot_contacts is not None and foot_contacts.ndim == 3:
                     foot_contacts = foot_contacts[0]
 
-                # Motion must have the same number of joints as the current model's skeleton (77 for SOMA)
+                # Motion must match the current model's skeleton after auto-switch
                 num_joints_loaded = joints_pos.shape[1]
                 num_joints_skeleton = session.skeleton.nbjoints
                 if num_joints_loaded != num_joints_skeleton:
@@ -835,8 +900,8 @@ def create_gui(
                         from kimodo.skeleton import global_rots_to_local_rots
 
                         skel30 = SOMASkeleton30().to(demo.device)
-                        if "local_rot_mats" in data:
-                            local_rot_30 = torch.from_numpy(data["local_rot_mats"]).to(demo.device)
+                        if "local_rot_mats" in motion_dict:
+                            local_rot_30 = motion_dict["local_rot_mats"].to(device=demo.device, dtype=torch.float32)
                             if local_rot_30.ndim == 4:
                                 local_rot_30 = local_rot_30[0]
                         else:
@@ -847,8 +912,13 @@ def create_gui(
 
                         if foot_contacts is not None and foot_contacts.shape[-1] == 4:
                             foot_contacts = torch.cat(
-                                [foot_contacts[..., :2], foot_contacts[..., 1:2],
-                                 foot_contacts[..., 2:4], foot_contacts[..., 3:4]], dim=-1
+                                [
+                                    foot_contacts[..., :2],
+                                    foot_contacts[..., 1:2],
+                                    foot_contacts[..., 2:4],
+                                    foot_contacts[..., 3:4],
+                                ],
+                                dim=-1,
                             )
                     else:
                         raise ValueError(
@@ -900,26 +970,33 @@ def create_gui(
                 if session is None:
                     return
 
+                load_path = gui_load_motion_path_text.value
+                loading_notif = event_client.add_notification(
+                    title="Loading motion...",
+                    body=f"Loading from {load_path}",
+                    loading=True,
+                    with_close_button=False,
+                    auto_close_seconds=None,
+                )
                 try:
-                    load_path = gui_load_motion_path_text.value
                     load_motion(event_client, load_path)
 
-                    event_client.add_notification(
-                        title="Motion loaded!",
-                        body=f"Loaded motion from {load_path} ({session.max_frame_idx + 1} frames, {session.cur_duration:.2f}s)",
-                        auto_close_seconds=5.0,
-                        color="green",
-                    )
+                    loading_notif.title = "Motion loaded!"
+                    loading_notif.body = f"Loaded motion from {load_path} ({session.max_frame_idx + 1} frames, {session.cur_duration:.2f}s)"
+                    loading_notif.loading = False
+                    loading_notif.with_close_button = True
+                    loading_notif.auto_close_seconds = 5.0
+                    loading_notif.color = "green"
                 except Exception as e:
                     import traceback
 
                     traceback.print_exc()
-                    event_client.add_notification(
-                        title="Failed to load motion!",
-                        body=str(e),
-                        auto_close_seconds=10.0,
-                        color="red",
-                    )
+                    loading_notif.title = "Failed to load motion!"
+                    loading_notif.body = str(e)
+                    loading_notif.loading = False
+                    loading_notif.with_close_button = True
+                    loading_notif.auto_close_seconds = 10.0
+                    loading_notif.color = "red"
 
             def save_constraints(client, save_path):
                 session = demo.client_sessions[client.client_id]
@@ -1192,7 +1269,9 @@ def create_gui(
                     options=(
                         ["NPZ", "CSV"]
                         if "g1" in model_name.lower()
-                        else ["NPZ", "AMASS NPZ"] if "smplx" in model_name.lower() else ["NPZ", "BVH"]
+                        else ["NPZ", "AMASS NPZ"]
+                        if "smplx" in model_name.lower()
+                        else ["NPZ", "BVH"]
                     ),
                     initial_value="NPZ",
                 )
@@ -1250,49 +1329,16 @@ def create_gui(
                 )
 
             def _motion_to_npz_bytes(motion) -> bytes:
-                import io
-
                 motion_data = _motion_to_numpy_dict(motion)
-                motion_data.pop("root_positions")
-                buf = io.BytesIO()
-                np.savez(buf, **motion_data)
-                return buf.getvalue()
+                return kimodo_npz_to_bytes(motion_data)
 
             def _motion_to_csv_bytes(motion, session: ClientSession) -> bytes:
-                import io
-
-                from kimodo.exports.mujoco import MujocoQposConverter
-
                 motion_data = _motion_to_numpy_dict(motion)
-                converter = MujocoQposConverter(session.skeleton)
-                qpos = converter.dict_to_qpos(
-                    {
-                        "local_rot_mats": motion_data["local_rot_mats"],
-                        "root_positions": motion_data["root_positions"],
-                    },
-                    demo.device,
-                    numpy=True,
-                )
-                buf = io.StringIO()
-                np.savetxt(buf, qpos, delimiter=",")
-                return buf.getvalue().encode("utf-8")
+                return g1_csv_to_bytes(motion_data, session.skeleton, demo.device)
 
             def _motion_to_amass_npz_bytes(motion, session: ClientSession) -> bytes:
-                import io
-
-                from kimodo.exports.smplx import AMASSConverter
-
                 motion_data = _motion_to_numpy_dict(motion)
-                converter = AMASSConverter(skeleton=session.skeleton, fps=session.model_fps)
-                buf = io.BytesIO()
-                converter.convert_save_npz(
-                    {
-                        "local_rot_mats": motion_data["local_rot_mats"],
-                        "root_positions": motion_data["root_positions"],
-                    },
-                    buf,
-                )
-                return buf.getvalue()
+                return amass_npz_to_bytes(motion_data, session.skeleton, session.model_fps)
 
             def _get_motion_export_formats(loaded_model_name: str) -> list[str]:
                 model_name_lower = (loaded_model_name or "").lower()
@@ -1302,11 +1348,15 @@ def create_gui(
                     return ["NPZ", "AMASS NPZ"]
                 return ["NPZ", "BVH"]
 
-            def _update_motion_export_dropdown(loaded_model_name: str) -> None:
+            def _update_format_dropdown(dropdown, loaded_model_name: str) -> None:
                 new_options = _get_motion_export_formats(loaded_model_name)
-                current_value = str(gui_download_format_dropdown.value)
-                gui_download_format_dropdown.options = new_options
-                gui_download_format_dropdown.value = current_value if current_value in new_options else new_options[0]
+                current_value = str(dropdown.value)
+                dropdown.options = new_options
+                dropdown.value = current_value if current_value in new_options else new_options[0]
+
+            def _update_motion_export_dropdown(loaded_model_name: str) -> None:
+                _update_format_dropdown(gui_download_format_dropdown, loaded_model_name)
+                _update_format_dropdown(gui_save_motion_format_dropdown, loaded_model_name)
 
             def _coerce_download_filename(raw_name: str, *, ext: str) -> str:
                 """Coerce a user-entered filename to a safe basename with the desired extension.
@@ -1579,7 +1629,7 @@ def create_gui(
                 save_constraints(event_client, constraint_path)
                 # save the motion
                 motion_path = os.path.join(save_dir, "motion.npz")
-                save_motion(event_client, motion_path)
+                save_motion(event_client, motion_path, "NPZ")
                 # save the gui metadata
                 meta_path = os.path.join(save_dir, "meta.json")
                 prompt_texts = []
@@ -2870,8 +2920,11 @@ def create_gui(
                 demo.set_frame(client_id, 0)
 
             except Exception as e:
-                raise e
-                # If client disconnected or any other error occurred
+                import traceback
+
+                traceback.print_exc()
+                print(f"Error during generation for client {event_client.client_id}: {e}")
+                # Re-enable buttons and notify the user
                 if event_client.client_id in demo.client_sessions:
                     session = demo.client_sessions[event_client.client_id]
                     gui_generate_button.disabled = False
@@ -2879,13 +2932,16 @@ def create_gui(
                     gui_save_example_button.disabled = False
                     gui_save_motion_button.disabled = False
                     gui_download_button.disabled = False
-                    event_client.add_notification(
-                        title="Generation failed!",
-                        body=f"Error: {str(e)}",
-                        auto_close_seconds=5.0,
-                        color="red",
-                    )
-                print(f"Error during generation for client {event_client.client_id}: {e}")
+                    try:
+                        event_client.add_notification(
+                            title="Generation failed!",
+                            body=f"Error: {str(e)}",
+                            auto_close_seconds=5.0,
+                            color="red",
+                        )
+                    except Exception:
+                        pass
+                demo.check_cuda_health()
 
     #
     # Visualization settings
@@ -3079,7 +3135,9 @@ def create_gui(
                 return
             session = demo.client_sessions[client_id]
             for motion in session.motions.values():
-                motion.character.set_show_foot_contacts(gui_viz_foot_contacts_checkbox.value, frame_idx=motion.cur_frame_idx)
+                motion.character.set_show_foot_contacts(
+                    gui_viz_foot_contacts_checkbox.value, frame_idx=motion.cur_frame_idx
+                )
 
         @gui_viz_skinned_mesh_checkbox.on_update
         def _(_) -> None:

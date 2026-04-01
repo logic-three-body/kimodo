@@ -9,7 +9,7 @@ kimodo/
 │   │   ├── backbone.py           # Transformer encoder backbone
 │   │   ├── diffusion.py          # Diffusion process
 │   │   ├── cfg.py                # Classifier-free guidance
-│   │   ├── common.py              # Shared model utilities
+│   │   ├── common.py             # Shared model utilities
 │   │   ├── load_model.py         # Model loading and registry lookup
 │   │   ├── loading.py            # Checkpoint loading utilities
 │   │   ├── registry.py           # Model registry (skeleton, checkpoint URLs)
@@ -21,11 +21,11 @@ kimodo/
 │   │   │   ├── base.py           # Base motion rep types
 │   │   │   ├── kimodo_motionrep.py
 │   │   │   └── tmr_motionrep.py
-│   │   ├── conditioning.py      # Conditioning (text, constraints)
+│   │   ├── conditioning.py       # Conditioning (text, constraints)
 │   │   ├── feature_utils.py      # Feature extraction
 │   │   ├── feet.py               # Foot contact / smoothing
 │   │   ├── smooth_root.py        # Smooth root representation
-│   │   └── stats.py             # Normalization statistics
+│   │   └── stats.py              # Normalization statistics
 │   ├── skeleton/                 # Skeleton definitions and kinematics
 │   │   ├── definitions.py        # Skeleton topology (joints, chains)
 │   │   ├── registry.py           # Skeleton registry
@@ -50,26 +50,28 @@ kimodo/
 │   │   ├── state.py              # Application state
 │   │   ├── ui.py                 # UI layout and callbacks
 │   │   ├── generation.py         # Generation pipeline for demo
-│   │   ├── embedding_cache.py   # Cached text embeddings
+│   │   ├── embedding_cache.py    # Cached text embeddings
 │   │   ├── queue_manager.py      # Request queue for demo
 │   │   └── __main__.py           # Demo run as module
-│   ├── exports/                  # Motion export formats
-│   │   ├── bvh.py                # BVH export
-│   │   ├── mujoco.py             # MuJoCo export
-│   │   └── smplx.py              # SMPL-X export
+│   ├── exports/                  # Motion I/O and format conversion
+│   │   ├── motion_io.py          # Kimodo motion dict helpers (load, save, resample)
+│   │   ├── motion_convert_lib.py # Library API for format conversion
+│   │   ├── motion_formats.py     # Format detection and FPS resolution
+│   │   ├── bvh.py                # SOMA BVH read/write
+│   │   ├── mujoco.py             # G1 MuJoCo qpos conversion
+│   │   └── smplx.py              # AMASS / SMPL-X conversion
 │   ├── metrics/                  # Evaluation metrics
 │   │   ├── base.py               # Metric base classes
-│   │   ├── foot_skate.py         # Foot skate metric
-│   │   ├── constraints.py       # Constraint satisfaction
+│   │   ├── foot_skate.py         # Foot skate metrics
+│   │   ├── constraints.py        # Constraint metrics
 │   │   └── tmr.py                # TMR-based metrics
 │   ├── scripts/                  # CLI and helper scripts
 │   │   ├── generate.py           # CLI for motion synthesis (kimodo_gen)
+│   │   ├── motion_convert.py     # CLI for format conversion (kimodo_convert)
 │   │   ├── run_text_encoder_server.py  # Text encoder server (kimodo_textencoder)
 │   │   ├── gradio_theme.py       # Gradio theme for demo
-│   │   ├── docker-entrypoint.sh  # Docker entrypoint for demo
 │   │   ├── lock_requirements.py  # Dependency locking
-│   │   ├── mujoco_load.py        # MuJoCo scene loading
-│   │   └── ...                   # Other helpers
+│   │   └── mujoco_load.py        # MuJoCo g1 csv loading
 │   ├── assets/                   # Package data (shipped with package)
 │   │   ├── demo/                 # Demo examples and config
 │   │   └── skeletons/            # Skeleton assets
@@ -97,4 +99,5 @@ Entry points (from `pyproject.toml`):
 
 - **`kimodo_gen`** — command-line motion synthesis (`kimodo.scripts.generate:main`)
 - **`kimodo_demo`** — interactive web demo (`kimodo.demo:main`)
+- **`kimodo_convert`** — motion format conversion (`kimodo.scripts.motion_convert:main`)
 - **`kimodo_textencoder`** — text encoder server (`kimodo.scripts.run_text_encoder_server:main`)

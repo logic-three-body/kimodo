@@ -84,8 +84,8 @@ class SOMASkin:
         transl = joint_pos[:, self.skeleton.root_idx] - self.skeleton.neutral_joints[0:1]
 
         output = self.soma_model_pose(
-            local_joint_rots_mats.to(self.device),
-            transl=transl.to(self.device),
+            local_joint_rots_mats.to(device=self.device, dtype=torch.float32),
+            transl=transl.to(device=self.device, dtype=torch.float32),
             pose2rot=False,
         )
         return output["vertices"]
