@@ -39,6 +39,7 @@ Kimodo is a **ki**nematic **mo**tion **d**iffusi**o**n model trained on a large-
 
 - [Installation](getting_started/installation.md)
 - [Quick Start](getting_started/quick_start.md)
+- [WSL Recovery](getting_started/wsl_recovery_windows_user_migration.md)
 - [Command Line Interface](user_guide/cli.md)
 - [Interactive Demo](interactive_demo/index.md)
 - [Project Structure](project_structure.md)
@@ -50,6 +51,7 @@ Kimodo is a **ki**nematic **mo**tion **d**iffusi**o**n model trained on a large-
 
 getting_started/installation
 getting_started/quick_start
+getting_started/wsl_recovery_windows_user_migration
 ```
 
 ```{toctree}
