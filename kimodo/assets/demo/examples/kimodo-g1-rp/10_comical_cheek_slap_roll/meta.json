@@ -1,0 +1,11 @@
+{
+  "text": "A single person rolls on the ground while repeatedly and comically slapping their own cheeks.",
+  "duration": 5.0,
+  "num_samples": 1,
+  "diffusion_steps": 100,
+  "cfg": {
+    "enabled": true,
+    "text_weight": 2.0,
+    "constraint_weight": 2.0
+  }
+}

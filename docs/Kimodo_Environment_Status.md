@@ -1,6 +1,6 @@
 # Kimodo Environment Status
 
-Updated: 2026-03-29
+Updated: 2026-04-01
 
 ## Current State
 
@@ -17,23 +17,27 @@ Updated: 2026-03-29
 - Primary GPU: `NVIDIA GeForce RTX 4090`
 - Hugging Face auth: configured and `hf auth whoami` succeeds
 - Hugging Face user: `michaelcarter1997`
-- Install style: package install for runtime, local clone kept separately for source reading/editing
+- Install style: editable install from the local clone
 - Recommended runtime env var on this machine: `HF_HUB_DISABLE_XET=1`
+- Persistent service launcher: `/root/Project/Kimodo/kimodo/scripts/kimodo_web_tmux.sh`
+- Persistent service env file: `/root/Project/Kimodo/kimodo/scripts/kimodo_web.env`
 
 ## Important Note About Runtime vs. Clone
 
-The current CLI commands are coming from the installed package in:
+The active runtime code now comes from the local editable clone.
 
-`/root/miniforge3/envs/kimodo/lib/python3.10/site-packages/kimodo/__init__.py`
-
-The local git clone under `/root/Project/Kimodo/kimodo` is available for source reading and later development, but it is not the package currently driving `kimodo_gen` / `kimodo_demo`.
-
-If you want the local clone to become the active runtime code later, reinstall from the clone explicitly, for example:
+Runtime import check:
 
 ```bash
 source /root/miniforge3/etc/profile.d/conda.sh
 conda activate kimodo
-python -m pip install -e /root/Project/Kimodo/kimodo
+python -c "import inspect, kimodo; print(inspect.getfile(kimodo))"
+```
+
+Expected output:
+
+```text
+/root/Project/Kimodo/kimodo/kimodo/__init__.py
 ```
 
 ## What Has Been Verified
@@ -50,6 +54,15 @@ kimodo_gen "A person walks forward." --model Kimodo-SOMA-RP-v1 --duration 5.0 --
 ```
 
 - Generated file exists at `/root/Project/Kimodo/output/test_walk.npz`.
+- G1 CLI generation also succeeded with:
+
+```bash
+kimodo_gen "A person walks forward." --model Kimodo-G1-RP-v1 --duration 2.0 --output /root/Project/Kimodo/output/test_walk_g1
+```
+
+- Generated files exist at:
+  - `/root/Project/Kimodo/output/test_walk_g1.npz`
+  - `/root/Project/Kimodo/output/test_walk_g1.csv`
 - `test_walk.npz` contains:
   - `local_rot_mats`: `(150, 77, 3, 3)`
   - `global_rot_mats`: `(150, 77, 3, 3)`
@@ -59,7 +72,14 @@ kimodo_gen "A person walks forward." --model Kimodo-SOMA-RP-v1 --duration 5.0 --
   - `foot_contacts`: `(150, 4)`
   - `global_root_heading`: `(150, 2)`
 - `kimodo_demo --model Kimodo-SOMA-RP-v1` loads successfully.
+- `kimodo_textencoder` returns embeddings successfully for:
+
+```text
+A single person rolls on the ground while repeatedly and comically slapping their own cheeks.
+```
+
 - After the first-time `viser` frontend build completes, `http://127.0.0.1:7860/` and `http://localhost:7860/` return `HTTP 200 OK`.
+- `http://127.0.0.1:9550/` also returns `HTTP 200 OK` after the text encoder service is started.
 
 ## Closed-Loop Result
 
@@ -148,47 +168,42 @@ kimodo_demo --model Kimodo-SOMA-RP-v1
 
 ### 6. Persistence and Keep-Alive (Tmux)
 
-To keep the `kimodo_demo` and `kimodo_textencoder` services running in the background persistently (even when SSH disconnects), use `tmux`.
+Use the detached tmux launcher instead of creating panes manually:
 
-**A. Always Check Existing Sessions First**
-Before starting, always check if the environment is already running to avoid port conflicts and OOM errors:
 ```bash
-tmux ls
-```
-If you see a session named `kimodo_web` listed, simply reattach to it instead of starting a new one:
-```bash
-tmux attach -t kimodo_web
+cd /root/Project/Kimodo/kimodo
+./scripts/kimodo_web_tmux.sh start
+./scripts/kimodo_web_tmux.sh status
 ```
 
-**B. Create a New Session**
-If no session exists, create one:
+This launcher reads:
+
+- `/root/Project/Kimodo/kimodo/scripts/kimodo_web.env`
+
+and creates one detached tmux session:
+
+- `kimodo_web`
+
+with two windows:
+
+- `textencoder`
+- `demo`
+
+Useful follow-up commands:
+
 ```bash
-tmux new -s kimodo_web
+cd /root/Project/Kimodo/kimodo
+./scripts/kimodo_web_tmux.sh attach
+./scripts/kimodo_web_tmux.sh restart
+./scripts/kimodo_web_tmux.sh stop
 ```
-
-**C. Start the Services**
-Inside the Tmux window, it is recommended to split the screen (press `Ctrl+b` then `%` or `"`) and run each component:
-
-*   **Pane 1 (Text Encoder):**
-    ```bash
-    source /root/miniforge3/etc/profile.d/conda.sh
-    conda activate kimodo
-    kimodo_textencoder
-    ```
-*   **Pane 2 (Demo):** Wait for Pane 1 to finish loading the model, then:
-    ```bash
-    source /root/miniforge3/etc/profile.d/conda.sh
-    conda activate kimodo
-    export HF_HUB_DISABLE_XET=1
-    kimodo_demo --model Kimodo-SOMA-RP-v1
-    ```
-
-**D. Detach**
-When everything is running smoothly, press `Ctrl+b` and release, then `d` to detach. The processes will continue safely in the background. If a process hangs, you can forcefully kill the session with `tmux kill-session -t kimodo_web`. 
 
 ## Current Artifacts
 
 - CLI output: `/root/Project/Kimodo/output/test_walk.npz`
+- G1 CLI output: `/root/Project/Kimodo/output/test_walk_g1.npz`
+- Detached tmux launcher: `/root/Project/Kimodo/kimodo/scripts/kimodo_web_tmux.sh`
+- Detached tmux env file: `/root/Project/Kimodo/kimodo/scripts/kimodo_web.env`
 - Local source clone: `/root/Project/Kimodo/kimodo`
 - Runtime package environment: `/root/miniforge3/envs/kimodo`
 
@@ -201,16 +216,16 @@ When everything is running smoothly, press `Ctrl+b` and release, then `d` to det
 - Install route: Miniforge + conda
 - HF token configured: yes
 - Demo launch: success
+- Text encoder launch: success
 - localhost:7860 reachable: yes
+- localhost:9550 reachable: yes
 - Model auto-download: success
 
 ## Recommended Next Action
 
-If you want the local clone under `/root/Project/Kimodo/kimodo` to become the active runtime code for development, reinstall it in editable mode and then re-run one CLI sanity check:
+Use the detached tmux launcher for all future service starts:
 
 ```bash
-source /root/miniforge3/etc/profile.d/conda.sh
-conda activate kimodo
-python -m pip install -e /root/Project/Kimodo/kimodo
-kimodo_gen --help
+cd /root/Project/Kimodo/kimodo
+./scripts/kimodo_web_tmux.sh start
 ```

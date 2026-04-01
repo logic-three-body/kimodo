@@ -42,6 +42,28 @@ If you will be restarting the demo frequently, we recommend first starting the t
 
 The demo will also automatically download the Kimodo model checkpoint on launch and whenever needed when the model preference is changed in the UI.
 
+## Recommended Persistent Launch (tmux)
+
+For a detached launch that survives closing your terminal window, use the bundled tmux launcher:
+
+```bash
+cd /root/Project/Kimodo/kimodo
+./scripts/kimodo_web_tmux.sh start
+./scripts/kimodo_web_tmux.sh status
+```
+
+This starts both:
+
+- `kimodo_textencoder` on `http://localhost:9550`
+- `kimodo_demo` on `http://localhost:7860`
+
+To inspect logs later:
+
+```bash
+cd /root/Project/Kimodo/kimodo
+./scripts/kimodo_web_tmux.sh attach
+```
+
 ## Launch from Command Line
 If you installed Kimodo as a package or from source, the demo can be started with:
 ```bash

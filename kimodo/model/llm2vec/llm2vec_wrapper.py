@@ -35,12 +35,18 @@ class LLM2VecEncoder:
             torch_dtype=torch_dtype,
             cache_dir=cache_dir,
         )
+        self._target_device = self.model.model.device
         self.model.eval()
         for p in self.model.parameters():
             p.requires_grad = False
 
-    def to(self, device: torch.device):
-        self.model = self.model.to(device)
+    def to(self, device: torch.device | str | None = None, dtype=None, eager: bool = False):
+        if device is not None:
+            self._target_device = torch.device(device)
+        if dtype is not None:
+            self.model = self.model.to(dtype=dtype)
+        if eager and device is not None:
+            self.model = self.model.to(self._target_device)
         return self
 
     def eval(self):
@@ -48,7 +54,7 @@ class LLM2VecEncoder:
         return self
 
     def get_device(self):
-        return self.model.model.device
+        return self._target_device
 
     def __call__(self, text: list[str] | str):
         is_string = False
@@ -56,8 +62,14 @@ class LLM2VecEncoder:
             text = [text]
             is_string = True
 
+        target_device = self.get_device()
         with torch.no_grad():
-            encoded_text = self.model.encode(text, batch_size=len(text), show_progress_bar=False)
+            encoded_text = self.model.encode(
+                text,
+                batch_size=len(text),
+                show_progress_bar=False,
+                device=str(target_device),
+            )
 
         assert len(encoded_text.shape)
         assert self.llm_dim == encoded_text.shape[-1]
@@ -69,5 +81,10 @@ class LLM2VecEncoder:
             encoded_text = encoded_text[0]
             lengths = lengths[0]
 
-        encoded_text = torch.tensor(encoded_text).to(self.get_device())
+        if torch.is_tensor(encoded_text):
+            encoded_text = encoded_text.detach().clone()
+        else:
+            encoded_text = torch.as_tensor(encoded_text)
+
+        encoded_text = encoded_text.to(target_device)
         return encoded_text, lengths

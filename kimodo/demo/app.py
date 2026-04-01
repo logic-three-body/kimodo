@@ -57,6 +57,8 @@ class Demo:
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {self.device}")
         self.models: dict[str, ModelBundle] = {}
+        self._prewarm_threads: dict[str, threading.Thread] = {}
+        self._prewarm_lock = threading.Lock()
         resolved = resolve_model_name(default_model_name, "Kimodo")
         if resolved not in MODEL_NAMES:
             raise ValueError(f"Unknown model '{default_model_name}'. Expected one of: {MODEL_NAMES}")
@@ -151,6 +153,22 @@ class Demo:
         self.prewarm_embedding_cache(model_name, bundle.model)
         return bundle
 
+    @staticmethod
+    def _iter_example_prompts(meta: dict) -> list[str]:
+        prompts: list[str] = []
+        single_prompt = meta.get("text")
+        if isinstance(single_prompt, str) and single_prompt.strip():
+            prompts.append(single_prompt)
+
+        for key in ("texts", "prompts_text"):
+            value = meta.get(key, [])
+            if isinstance(value, str):
+                value = [value]
+            if isinstance(value, (list, tuple)):
+                prompts.extend(prompt for prompt in value if isinstance(prompt, str) and prompt.strip())
+
+        return prompts
+
     def prewarm_embedding_cache(self, model_name: str, model: object) -> None:
         encoder = getattr(model, "text_encoder", None)
         if not isinstance(encoder, CachedTextEncoder):
@@ -172,12 +190,34 @@ class Demo:
                     meta = load_json(meta_path)
                 except Exception:
                     continue
-                for prompt in meta.get("prompts_text", []):
-                    if isinstance(prompt, str):
-                        prompt_set.add(prompt)
+                for prompt in self._iter_example_prompts(meta):
+                    prompt_set.add(prompt)
 
-        if prompt_set:
-            encoder.prewarm(list(prompt_set))
+        if not prompt_set:
+            return
+
+        prompts = sorted(prompt_set)
+        with self._prewarm_lock:
+            existing = self._prewarm_threads.get(model_name)
+            if existing is not None and existing.is_alive():
+                return
+
+            def _prewarm_worker() -> None:
+                try:
+                    encoder.prewarm(prompts)
+                except Exception as exc:
+                    print(f"Warning: failed to prewarm text embeddings for {model_name}: {exc}")
+                finally:
+                    with self._prewarm_lock:
+                        self._prewarm_threads.pop(model_name, None)
+
+            thread = threading.Thread(
+                target=_prewarm_worker,
+                name=f"kimodo-prewarm-{model_name}",
+                daemon=True,
+            )
+            self._prewarm_threads[model_name] = thread
+            thread.start()
 
     def build_constraint_tracks(
         self, client: viser.ClientHandle, skeleton: SkeletonBase

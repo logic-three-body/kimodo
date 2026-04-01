@@ -351,7 +351,9 @@ class LLM2Vec(nn.Module):
         sentences_sorted = [sentences[idx] for idx in length_sorted_idx]
         all_embeddings = []
 
-        if torch.cuda.device_count() <= 1:
+        use_multiprocessing = device is None and torch.cuda.device_count() > 1
+
+        if not use_multiprocessing:
             # This branch also support mps devices
             self.to(device)
             for start_index in trange(

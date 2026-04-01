@@ -2,130 +2,116 @@
 
 **适用场景**
 
-- 运行持续的 Kimodo Demo (Gradio 服务) 和文本编码器 (Text Encoder)
-- 网络不稳定，SSH 经常自动断开
-- 希望服务在后台常驻运行，即使关闭本地终端页面依然可以访问 `localhost:7860`
+- 希望 `kimodo_textencoder` 和 `kimodo_demo` 在后台常驻运行
+- 关闭本地终端、SSH 断开后，`http://localhost:9550` 和 `http://localhost:7860` 仍然可用
+- 不想再手工进入 tmux pane 里逐条敲命令
 
-## 0. 安装 (Ubuntu/Debian)
+## 1. 推荐入口
 
-```bash
-sudo apt update
-sudo apt install -y tmux
-```
+本仓库已经提供了固定的 env 文件和 detached tmux 启动器：
 
-## 1. 核心机制 (The "Why")
+- 环境文件: [scripts/kimodo_web.env](/root/Project/Kimodo/kimodo/scripts/kimodo_web.env)
+- 启动器: [scripts/kimodo_web_tmux.sh](/root/Project/Kimodo/kimodo/scripts/kimodo_web_tmux.sh)
 
-> **后台运行，前台直播**
->
-> Tmux 将**程序运行**(Server)与**显示界面**(Client)解耦。即使断网、关机、退出 SSH，
-> Server 端的 Kimodo 进程依然在内存中运行，直到你下次回来重连画面。
+当前默认配置：
 
-## 2. 标准作业流程 (SOP)
+- tmux session: `kimodo_web`
+- text encoder: `0.0.0.0:9550`
+- demo: `0.0.0.0:7860`
+- model: `Kimodo-G1-RP-v1`
 
-### 第一步: 创建保险箱 (Start)
+## 2. 一键启动
 
-不要直接跑代码，先新建一个 Tmux 会话:
+在仓库根目录执行：
 
 ```bash
-tmux new -s kimodo_web
-# -s 后面是名字，建议以服务名称标记
+cd /root/Project/Kimodo/kimodo
+./scripts/kimodo_web_tmux.sh start
 ```
 
-### 第二步: 启动 Kimodo 服务 (Run)
-
-在 Tmux 窗口内，首先激活运行环境：
+查看状态：
 
 ```bash
-# 激活 conda 和专属环境，并设置防断联环境变量
-source /root/miniforge3/etc/profile.d/conda.sh
-conda activate kimodo
-export HF_HUB_DISABLE_XET=1
+./scripts/kimodo_web_tmux.sh status
 ```
 
-**运行 Demo 界面**:
+成功后应看到：
+
+- tmux session `kimodo_web`
+- `9550` 由 `kimodo_textencoder` 监听
+- `7860` 由 `kimodo_demo` 监听
+
+然后在浏览器打开：
+
+- `http://localhost:9550`
+- `http://localhost:7860`
+
+这套启动方式本身就是 detached 的，所以命令执行完后你可以直接关闭当前终端窗口，不需要先 `attach` 再 `Ctrl+b d`。
+
+## 3. 常用命令
 
 ```bash
-kimodo_demo --model Kimodo-SOMA-RP-v1
+cd /root/Project/Kimodo/kimodo
+
+# 启动
+./scripts/kimodo_web_tmux.sh start
+
+# 查看会话和端口
+./scripts/kimodo_web_tmux.sh status
+
+# 进入 tmux 看实时日志
+./scripts/kimodo_web_tmux.sh attach
+
+# 重启两项服务
+./scripts/kimodo_web_tmux.sh restart
+
+# 停止两项服务
+./scripts/kimodo_web_tmux.sh stop
 ```
 
-> **说明**: 初次启动时 `viser` 前端会在后台进行构建，可能需要等待几分钟。启动成功后可以访问 `http://127.0.0.1:7860` 或 `http://localhost:7860`。
+## 4. 修改环境配置
 
-### 第三步: 安全撤离 (Detach)
-
-当你想离开时(或网络自动断了)，手动将任务挂起:
-
-1. 按下 **Ctrl + b** (松开)
-2. 按下 **d** (Detach)
-
-结果: 你回到普通终端，提示 `[detached]`，但 Kimodo 服务在后台继续运作。
-
-### 第四步: 恢复现场 (Attach)
+如需修改模型、端口或环境变量，只改 env 文件即可：
 
 ```bash
-# 1. 查看有哪些会话在跑
-tmux ls
-
-# 2. 进入指定的会话
-tmux attach -t kimodo_web
+vim /root/Project/Kimodo/kimodo/scripts/kimodo_web.env
 ```
 
-## 3. 常用指令速查表 (Cheat Sheet)
+常用配置项：
 
-**核心前缀键 (Prefix)**: 所有 Tmux 快捷键都必须先按 **Ctrl + b**，松开后再按后续按键。
+- `KIMODO_MODEL`: 默认模型，例如 `Kimodo-G1-RP-v1`
+- `SERVER_PORT`: demo 端口，默认 `7860`
+- `GRADIO_SERVER_PORT`: text encoder 端口，默认 `9550`
+- `TEXT_ENCODER_DEVICE`: `auto`、`cpu`、`cuda:0`
+- `HF_HUB_DISABLE_XET` / `HF_HUB_OFFLINE`
 
-| 动作 | 命令/快捷键 | 说明 |
-| --- | --- | --- |
-| 新建会话 | `tmux` 或 `tmux new -s <名字>` | 开启一个新的工作区 |
-| 挂起离开 | Prefix + `d` | 退出当前会话(程序不中断) |
-| 查看列表 | `tmux ls` | 查看后台所有活着的会话 |
-| 恢复会话 | `tmux attach -t <名字>` | 重新进入某个会话 |
-| 杀死会话 | `tmux kill-session -t <名字>` | 彻底关闭某个会话(程序会停止) |
-| 左右分屏 | Prefix + `%` | 一边看日志，一边看 `nvtop` |
-| 上下分屏 | Prefix + `"` | 同上 |
-| 切换面板 | Prefix + 方向键 | 在分屏之间光标跳转 |
-| 关闭面板 | Ctrl + `d` (或输入 `exit`) | 关闭当前分屏 |
-
-## 4. Kimodo 进阶运行技巧 (Pro Tips)
-
-### 技巧 A: 查阅加载日志 (滚动模式)
-
-**痛点**: Text Encoder 初次加载模型（15GB）或 `viser` 编译时可能产生很长的日志，默认无法滚动翻看。
-
-**操作**:
-
-1. 按 Prefix + `[` 进入 Copy Mode
-2. 用方向键或 PageUp/PageDown 上下翻
-3. 按 `q` 退出
-
-### 技巧 B: 剥离显存压力与服务 (分屏启动)
-
-**由于 Llama 和 Kimodo 两边均占用一定系统资源，可以通过分别启动两个组件来解耦管理**。
-
-建议将 Tmux 屏幕切成左右或者上下两部分:
-
-- 左边窗口:
-  ```bash
-  source /root/miniforge3/etc/profile.d/conda.sh
-  conda activate kimodo
-  kimodo_textencoder
-  ```
-- 右边窗口 (等左侧模型加载完成后):
-  ```bash
-  source /root/miniforge3/etc/profile.d/conda.sh
-  conda activate kimodo
-  export HF_HUB_DISABLE_XET=1
-  kimodo_demo --model Kimodo-SOMA-RP-v1
-  ```
-另外，你仍可以水平分屏出一个 `watch -n 1 nvidia-smi` 以监控此时的 GPU 显存。
-
-### 技巧 C: 强制结束卡死的生成服务
-
-如果由于 `torch` 或模型 OOM 把 Tmux 卡死了，进不去服务重启:
+改完后执行：
 
 ```bash
-tmux kill-session -t kimodo_web
+cd /root/Project/Kimodo/kimodo
+./scripts/kimodo_web_tmux.sh restart
 ```
 
-## 一句话总结
+## 5. 日志与排障
 
-**进门 `tmux new`，出门 `Ctrl+b d`，回家 `tmux attach`。**
+进入日志：
+
+```bash
+cd /root/Project/Kimodo/kimodo
+./scripts/kimodo_web_tmux.sh attach
+```
+
+tmux 内部约定：
+
+- window `textencoder`: `kimodo_textencoder`
+- window `demo`: `kimodo_demo`
+
+如果页面已经开着但新增 example 或新配置没刷新出来，先刷新浏览器；必要时再执行一次：
+
+```bash
+./scripts/kimodo_web_tmux.sh restart
+```
+
+## 6. 一句话总结
+
+**以后不要手工 `tmux new` 再进 pane 启服务，统一用 `./scripts/kimodo_web_tmux.sh start`。**

@@ -1,0 +1,11 @@
+{
+  "text": "A person walks forward.",
+  "duration": 2.0,
+  "num_samples": 1,
+  "diffusion_steps": 100,
+  "cfg": {
+    "enabled": true,
+    "text_weight": 2.0,
+    "constraint_weight": 2.0
+  }
+}
